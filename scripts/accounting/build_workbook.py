@@ -40,12 +40,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-# ─── xlsx skill design tokens (imported via path manipulation) ────────────────
-XLSX_SKILL_DIR = "/home/z/my-project/skills/xlsx"
-for _sub in (XLSX_SKILL_DIR, os.path.join(XLSX_SKILL_DIR, "templates")):
-    if _sub not in sys.path:
-        sys.path.insert(0, _sub)
-
 # ─── Finance color convention (xlsx skill §2.4) ──────────────────────────────
 COLOR_INPUT = "0000FF"       # blue  — hardcoded user inputs / assumptions
 COLOR_FORMULA = "000000"    # black — in-sheet formulas
@@ -1128,25 +1122,67 @@ def build(request: dict, out_path: str) -> dict:
     }
 
 
+EXCEL_ERROR_TOKENS = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#NULL!",
+                      "#NUM!", "#N/A", "#SPILL!", "#CALC!")
+
+
+def recalc_with_libreoffice(path: str) -> str:
+    """Force LibreOffice to open the workbook headless, recalculate every
+    formula, and re-save it in place so cached values are populated
+    (openpyxl never evaluates formulas itself). Returns combined
+    stdout/stderr for logging; raises on failure."""
+    out_dir = tempfile.mkdtemp(prefix="xlsx_recalc_")
+    try:
+        # --convert-to xlsx forces a full load + recalculate + re-save cycle.
+        out = subprocess.run(
+            ["soffice", "--headless", "--norestore", "--calc",
+             "--convert-to", "xlsx", "--outdir", out_dir, path],
+            capture_output=True, text=True, timeout=120,
+        )
+        recalculated = os.path.join(out_dir, os.path.basename(path))
+        if out.returncode != 0 or not os.path.exists(recalculated):
+            raise RuntimeError(f"soffice exit {out.returncode}: {out.stdout}{out.stderr}")
+        with open(recalculated, "rb") as f:
+            data = f.read()
+        with open(path, "wb") as f:
+            f.write(data)
+        return out.stdout + out.stderr
+    finally:
+        try:
+            for fn in os.listdir(out_dir):
+                os.remove(os.path.join(out_dir, fn))
+            os.rmdir(out_dir)
+        except OSError:
+            pass
+
+
+def validate_workbook(path: str) -> list[str]:
+    """Scan every sheet for Excel error tokens (#REF!, #DIV/0!, ...) left
+    behind after recalculation."""
+    from openpyxl import load_workbook
+    problems = []
+    wb = load_workbook(path, data_only=True)
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value in EXCEL_ERROR_TOKENS:
+                    problems.append(f"{ws.title}!{cell.coordinate}: {cell.value}")
+    return problems
+
+
 def run_qa(path: str, tb_total_row: int) -> dict:
     results = {"recalc": None, "validate": None, "tb_balanced": None,
                "bs_balanced": None, "errors": []}
-    xlsx_py = os.path.join(XLSX_SKILL_DIR, "xlsx.py")
     try:
-        out = subprocess.run(["python3", xlsx_py, "recalc", path],
-                             capture_output=True, text=True, timeout=120)
-        results["recalc"] = out.stdout + out.stderr
-        if out.returncode != 0:
-            results["errors"].append(f"recalc exit {out.returncode}")
+        results["recalc"] = recalc_with_libreoffice(path)
     except Exception as e:
         results["errors"].append(f"recalc exception: {e}")
 
     try:
-        out = subprocess.run(["python3", xlsx_py, "validate", path],
-                             capture_output=True, text=True, timeout=60)
-        results["validate"] = out.stdout + out.stderr
-        if out.returncode != 0:
-            results["errors"].append(f"validate exit {out.returncode}")
+        problems = validate_workbook(path)
+        results["validate"] = "\n".join(problems) if problems else "no formula errors found"
+        if problems:
+            results["errors"].append(f"validate found {len(problems)} formula error(s)")
     except Exception as e:
         results["errors"].append(f"validate exception: {e}")
 
