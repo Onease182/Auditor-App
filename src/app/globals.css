@@ -121,3 +121,152 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ------------------------------------------------------------------
+   Custom utilities & keyframes — emerald/amber palette only
+   ------------------------------------------------------------------ */
+@layer utilities {
+  /* Subtle fade + slide-up entrance used by cards and tab content */
+  @keyframes fa-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .animate-fade-up {
+    animation: fa-fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Soft pulsing ring for "ready to generate" button */
+  @keyframes fa-pulse-ring {
+    0% {
+      box-shadow: 0 0 0 0 oklch(0.62 0.12 165 / 0.45);
+    }
+    70% {
+      box-shadow: 0 0 0 10px oklch(0.62 0.12 165 / 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 oklch(0.62 0.12 165 / 0);
+    }
+  }
+  .animate-pulse-ring {
+    animation: fa-pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  /* Subtle background gradient for the main content shell */
+  .bg-shell {
+    background-image:
+      radial-gradient(60% 40% at 50% -5%, color-mix(in oklch, var(--primary) 8%, transparent), transparent 70%),
+      linear-gradient(to bottom, var(--background), color-mix(in oklch, var(--muted) 45%, transparent));
+  }
+  .dark .bg-shell {
+    background-image:
+      radial-gradient(60% 40% at 50% -5%, color-mix(in oklch, var(--primary) 12%, transparent), transparent 70%),
+      linear-gradient(to bottom, var(--background), color-mix(in oklch, var(--muted) 35%, transparent));
+  }
+
+  /* Footer top-border gradient (emerald → amber hairline) */
+  .border-top-gradient {
+    position: relative;
+  }
+  .border-top-gradient::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(
+      to right,
+      transparent,
+      color-mix(in oklch, var(--primary) 50%, transparent),
+      color-mix(in oklch, var(--accent) 60%, transparent),
+      transparent
+    );
+    pointer-events: none;
+  }
+
+  /* Header gradient & glow — enhanced with dual-radial mesh */
+  .header-glow {
+    background-image:
+      linear-gradient(to bottom, color-mix(in oklch, var(--background) 92%, transparent), color-mix(in oklch, var(--background) 75%, transparent)),
+      radial-gradient(60% 100% at 20% 0%, color-mix(in oklch, var(--primary) 8%, transparent), transparent 60%),
+      radial-gradient(60% 100% at 80% 0%, color-mix(in oklch, var(--accent) 6%, transparent), transparent 60%),
+      radial-gradient(100% 100% at 50% 0%, color-mix(in oklch, var(--primary) 5%, transparent), transparent 70%);
+  }
+
+  /* Zebra striping for trial-balance / table rows */
+  .zebra-row:nth-child(odd) {
+    background-color: color-mix(in oklch, var(--muted) 50%, transparent);
+  }
+  .zebra-row:nth-child(even) {
+    background-color: transparent;
+  }
+
+  /* Custom slim scrollbar (used inside scroll areas) */
+  .scrollbar-slim {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
+  }
+  .scrollbar-slim::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-slim::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .scrollbar-slim::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
+  }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-up,
+    .animate-pulse-ring {
+      animation: none !important;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------
+   Print styles — show only the Summary Dashboard when printing
+   ------------------------------------------------------------------ */
+@media print {
+  /* Hide everything by default */
+  body * {
+    visibility: hidden;
+  }
+  /* Show the summary dashboard and its ancestors */
+  .print\:block {
+    display: block !important;
+  }
+  /* Show the summary card and everything inside it */
+  .print-summary-target,
+  .print-summary-target * {
+    visibility: visible;
+  }
+  /* Position the summary at the top of the page */
+  .print-summary-target {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  /* Remove shadows and borders for print */
+  .print-summary-target * {
+    box-shadow: none !important;
+  }
+  /* Ensure colors print */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

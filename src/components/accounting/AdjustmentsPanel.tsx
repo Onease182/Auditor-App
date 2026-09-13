@@ -1,5 +1,6 @@
 'use client'
 
+import { motion } from 'framer-motion'
 import { useAccountingStore } from '@/lib/store'
 import { ADJUSTMENT_TYPES, fmtCurrency } from '@/lib/accounting'
 import type { Adjustment } from '@/lib/accounting'
@@ -25,8 +26,14 @@ function AdjustmentRow({ adj, index }: AdjRowProps) {
   const currency = useAccountingStore((s) => s.company.currency)
 
   return (
-    <Card className="border-border/60 shadow-sm">
-      <CardContent className="py-4 space-y-3">
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+      whileHover={{ y: -2 }}
+    >
+      <Card className="border-border/60 shadow-sm transition-shadow hover:shadow-md">
+        <CardContent className="py-4 space-y-3">
         <div className="flex flex-wrap items-center gap-3">
           <div className="text-sm font-semibold text-muted-foreground">
             Adjustment #{index + 1}
@@ -120,8 +127,9 @@ function AdjustmentRow({ adj, index }: AdjRowProps) {
             {' computed in workbook'}
           </div>
         )}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </motion.div>
   )
 }
 
@@ -172,12 +180,25 @@ export function AdjustmentsPanel() {
       </Card>
 
       {adjustments.length === 0 ? (
-        <Card className="border-dashed">
-          <CardContent className="py-16 text-center">
-            <SlidersHorizontal className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
-            <p className="text-muted-foreground">
-              No adjustments yet. Add closing stock, depreciation and accruals
-              to produce a complete set of final accounts.
+        <Card className="border-dashed border-border/70 bg-card/50">
+          <CardContent className="py-14 px-6 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-accent/30 ring-1 ring-accent/40 shadow-inner">
+              <SlidersHorizontal className="h-8 w-8 text-accent-foreground" />
+            </div>
+            <h3 className="mt-5 text-base font-semibold text-foreground">
+              No adjustments yet
+            </h3>
+            <p className="mx-auto mt-1.5 max-w-md text-sm text-muted-foreground">
+              Add closing stock, depreciation, and accruals to produce a complete
+              set of final accounts. Adjustments are optional but recommended.
+            </p>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+              <Button size="sm" onClick={addAdjustment}>
+                <Plus className="h-4 w-4 mr-1.5" /> Add your first adjustment
+              </Button>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground/80">
+              Tip: depreciation is computed as a live formula referencing the Trial Balance.
             </p>
           </CardContent>
         </Card>

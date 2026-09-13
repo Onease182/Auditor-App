@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { writeFile, readFile, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import path from 'path'
 import os from 'os'
 import { randomUUID } from 'crypto'
@@ -46,6 +46,7 @@ interface GenerateRequest {
   company: CompanyInfo
   entries: JournalEntry[]
   adjustments: Adjustment[]
+  accountOverrides?: Record<string, string>
 }
 
 function runPython(reqPath: string, outPath: string): Promise<{
@@ -59,13 +60,51 @@ function runPython(reqPath: string, outPath: string): Promise<{
 }> {
   return new Promise((resolve) => {
     const args = [SCRIPT_PATH, reqPath, '--out', outPath]
-    const proc = spawn('python3', args, { cwd: process.cwd() })
+    // Resolve Python binary: try several candidates because the Next.js
+    // dev server may not inherit the shell's PATH that includes the venv.
+    // Use the realpath (resolved symlink) to avoid ENOENT on symlink chains.
+    const pythonCandidates = [
+      process.env.PYTHON_BIN,
+      '/home/z/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12',
+      '/home/z/.local/share/uv/python/cpython-3.12-linux-x86_64-gnu/bin/python3.12',
+      '/home/z/.venv/bin/python',
+      'python3',
+    ].filter(Boolean) as string[]
+    const venvSitePackages = '/home/z/.venv/lib/python3.12/site-packages'
+    const env = { ...process.env, PYTHONPATH: venvSitePackages }
+
+    // Use spawnSync to check which Python binary actually works before
+    // committing to async spawn. spawn() errors are async (ENOENT fires
+    // as an event, not in try/catch), so we verify synchronously first.
+    let workingBin: string | null = null
+    for (const bin of pythonCandidates) {
+      try {
+        const check = spawnSync(bin, ['--version'], {
+          stdio: 'pipe',
+          timeout: 3000,
+          env,
+        })
+        if (check.status === 0 || (check.error === null && check.stdout)) {
+          workingBin = bin
+          break
+        }
+      } catch {
+        // Try next candidate
+        continue
+      }
+    }
+    if (!workingBin) {
+      resolve({ ok: false, error: 'Could not find a working Python binary. Tried: ' + pythonCandidates.join(', ') })
+      return
+    }
+
+    const proc = spawn(workingBin, args, { cwd: process.cwd(), env })
     let stdout = ''
     let stderr = ''
-    proc.stdout.on('data', (d) => (stdout += d.toString()))
-    proc.stderr.on('data', (d) => (stderr += d.toString()))
-    proc.on('error', (err) => resolve({ ok: false, error: `spawn failed: ${err.message}` }))
-    proc.on('close', (code) => {
+    proc.stdout.on('data', (d: any) => (stdout += d.toString()))
+    proc.stderr.on('data', (d: any) => (stderr += d.toString()))
+    proc.on('error', (err: any) => resolve({ ok: false, error: `spawn failed: ${err.message}` }))
+    proc.on('close', (code: number) => {
       let parsed: any = null
       try {
         const trimmed = stdout.trim().split('\n').pop() || ''
@@ -86,32 +125,70 @@ function runPython(reqPath: string, outPath: string): Promise<{
   })
 }
 
-export async function POST(req: NextRequest) {
-  let body: GenerateRequest
-  try {
-    body = (await req.json()) as GenerateRequest
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 })
+function validateGenerateRequest(value: unknown): { ok: true; body: GenerateRequest } | { ok: false; error: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, error: 'Request body must be a JSON object.' }
   }
 
-  const { company, entries, adjustments } = body
-  if (!company?.name) {
-    return NextResponse.json({ ok: false, error: 'Company name is required' }, { status: 400 })
+  const body = value as Partial<GenerateRequest>
+  const company = body.company
+  const entries = body.entries
+  const adjustments = body.adjustments
+
+  if (!company || typeof company !== 'object') {
+    return { ok: false, error: 'Company details are required.' }
+  }
+  if (typeof company.name !== 'string' || !company.name.trim()) {
+    return { ok: false, error: 'Company name is required.' }
   }
   if (!Array.isArray(entries) || entries.length === 0) {
-    return NextResponse.json({ ok: false, error: 'At least one journal entry is required' }, { status: 400 })
+    return { ok: false, error: 'At least one journal entry is required.' }
+  }
+  if (!Array.isArray(adjustments)) {
+    return { ok: false, error: 'Adjustments must be an array.' }
   }
 
   for (const [i, e] of entries.entries()) {
+    if (!e || typeof e !== 'object') {
+      return { ok: false, error: `Entry #${i + 1} is invalid.` }
+    }
+    if (!Array.isArray(e.legs)) {
+      return { ok: false, error: `Entry #${i + 1} must include a legs array.` }
+    }
+    for (const [j, leg] of e.legs.entries()) {
+      if (!leg || typeof leg !== 'object' || typeof leg.account !== 'string') {
+        return { ok: false, error: `Entry #${i + 1}, leg #${j + 1} is missing an account name.` }
+      }
+    }
+
     const dr = e.legs.reduce((s, l) => s + (Number(l.debit) || 0), 0)
     const cr = e.legs.reduce((s, l) => s + (Number(l.credit) || 0), 0)
     if (Math.abs(dr - cr) > 0.005) {
-      return NextResponse.json({
+      return {
         ok: false,
-        error: `Entry #${i + 1} "${e.narration}" is not balanced (Dr ${dr} ≠ Cr ${cr})`,
-      }, { status: 400 })
+        error: `Entry #${i + 1} "${e.narration || 'Untitled'}" is not balanced (Dr ${dr} ≠ Cr ${cr}).`,
+      }
     }
   }
+
+  return { ok: true, body: body as GenerateRequest }
+}
+
+export async function POST(req: NextRequest) {
+  let raw: unknown
+  try {
+    raw = await req.json()
+  } catch {
+    return NextResponse.json({ ok: false, error: 'Invalid JSON body. Check the request payload and Content-Type header.' }, { status: 400 })
+  }
+
+  const validated = validateGenerateRequest(raw)
+  if (!validated.ok) {
+    return NextResponse.json({ ok: false, error: validated.error }, { status: 400 })
+  }
+
+  const requestBody = validated.body
+  const { company, entries, adjustments } = requestBody
 
   const id = randomUUID().slice(0, 8)
   const tmpReq = path.join(os.tmpdir(), `req_${id}.json`)
@@ -120,7 +197,7 @@ export async function POST(req: NextRequest) {
 
   try {
     await mkdir(DOWNLOAD_DIR, { recursive: true })
-    await writeFile(tmpReq, JSON.stringify(body), 'utf8')
+    await writeFile(tmpReq, JSON.stringify(requestBody), 'utf8')
     const result = await runPython(tmpReq, outPath)
     if (!result.ok || !existsSync(outPath)) {
       return NextResponse.json({

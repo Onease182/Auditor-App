@@ -85,7 +85,13 @@ export function ImportExportPanel() {
         onChange={handleFileImport}
         className="hidden"
       />
-      <Button variant="outline" size="sm" onClick={handleExport} disabled={entryCount === 0 && !companyName}>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleExport}
+        disabled={entryCount === 0 && !companyName}
+        data-export-json-trigger
+      >
         <Download className="h-3.5 w-3.5 mr-1.5" />
         Export JSON
       </Button>
@@ -105,7 +111,7 @@ export function ImportExportPanel() {
             <DialogDescription>
               Restore a previously-exported transaction set. The current data will be{' '}
               <strong>replaced</strong>.
-            </DialogHeader>
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="flex items-center gap-2">

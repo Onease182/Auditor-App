@@ -45,6 +45,7 @@ export interface WorkbookRequest {
   company: CompanyInfo
   entries: JournalEntry[]
   adjustments: Adjustment[]
+  accountOverrides?: Record<string, string> // accountName -> AccountClass
 }
 
 export const ADJUSTMENT_TYPES: { value: AdjustmentType; label: string; hint: string; usesRate: boolean; usesAmount: boolean }[] = [
@@ -410,28 +411,27 @@ export function parseCsvEntries(text: string): ParsedEntriesResult {
     const dr = cells[drIdx] ? Number(cells[drIdx].replace(/[^0-9.\-]/g, '')) : null
     const cr = cells[crIdx] ? Number(cells[crIdx].replace(/[^0-9.\-]/g, '')) : null
 
-    // Start a new entry when a Date is present
-    if (date) {
+    // Decide whether to start a new entry or append to the current one.
+    // A new entry starts when:
+    //   (a) there is no current entry, OR
+    //   (b) the row has BOTH a date AND a narration, AND that date+narration
+    //       differs from the current entry's (i.e. a new transaction begins).
+    // Otherwise the row is a continuation leg of the current entry.
+    const startNew =
+      !current ||
+      (date && narration &&
+       (date !== current.date || narration !== current.narration))
+
+    if (startNew) {
       current = {
         id: `e_${Math.random().toString(36).slice(2, 9)}`,
-        date,
-        narration: narration || '',
+        date: date || (current ? current.date : new Date().toISOString().slice(0, 10)),
+        narration: narration || (current ? current.narration : ''),
         legs: [],
       }
       entries.push(current)
-    } else if (!current) {
-      // First row without a date — create one with today's date
-      current = {
-        id: `e_${Math.random().toString(36).slice(2, 9)}`,
-        date: new Date().toISOString().slice(0, 10),
-        narration: narration || '',
-        legs: [],
-      }
-      entries.push(current)
-    } else if (narration) {
-      // Continuation row with a narration but no date — attach to current
-      // (don't overwrite the entry's existing narration unless it's empty)
-      if (!current.narration) current.narration = narration
+    } else if (narration && !current.narration) {
+      current.narration = narration
     }
 
     current!.legs.push({
